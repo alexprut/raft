@@ -6,14 +6,14 @@ import (
 	"time"
 )
 
-var candidateId int = 1 // FIXME this should be dynamic
+var id int = 1 // FIXME this should be allocated on start and immutable after
 var electionTimeout *time.Timer = nil
 var leaderState string
 var servers []int
 
 type LogEntry struct {
-	value int
-	term  int
+	value int // contains command for state machine
+	term  int // term when entry was received by leader
 }
 
 // Variables defined by the official Raft protocol
@@ -43,16 +43,17 @@ var matchIndex []int // for each server, index of highest log entry known to be 
 //	voteGranted: true means candidate received vote
 func requestVote(term int, candidateId int, lastLogIndex int, lastLogTerm int) (int, bool) {
 	if term < currentTerm {
-		return currentTerm, false
-	}
-	if leaderState == "leader" {
 		leaderState = "follower"
 		startNewElectionTimeout()
+		return currentTerm, false
 	}
+
+	// If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote
+	// TODO candidate’s log is at least as up-to-date as receiver’s log
 	if votedFor == 0 || candidateId == 0 {
+		votedFor = candidateId
 		return currentTerm, true
 	}
-	votedFor = candidateId
 	return currentTerm, true
 }
 
@@ -94,9 +95,9 @@ func startNewElectionTimeout() {
 		leaderState = "candidate"
 		// TODO requestVote in parallel to each of the other servers
 		votes := 1 // vote for himself
-		votedFor = candidateId
+		votedFor = id
 		for range servers {
-			_, voteGranted := requestVote(currentTerm, candidateId, len(log)-1, log[len(log)-1].term)
+			_, voteGranted := requestVote(currentTerm, id, len(log)-1, log[len(log)-1].term)
 			if voteGranted {
 				votes++
 			}
@@ -105,7 +106,14 @@ func startNewElectionTimeout() {
 			leaderState = "leader"
 			// Send heartbeat to all servers to establish leadership
 			for range servers {
-				appendEntries(currentTerm, candidateId, len(log)-1, log[len(log)-1].term, make([]int, 0), commitIndex)
+				appendEntries(currentTerm, id, len(log)-1, log[len(log)-1].term, make([]int, 0), commitIndex)
+			}
+			// Volatile state on leader reinitialized after election
+			for i, _ := range nextIndex {
+				nextIndex[i] = len(log)
+			}
+			for i, _ := range matchIndex {
+				nextIndex[i] = 0
 			}
 		}
 	})
