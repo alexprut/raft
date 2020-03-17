@@ -2,6 +2,7 @@ package raft
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"time"
 )
@@ -77,6 +78,14 @@ func appendEntries(term int, leaderId int, prevLogIndex int, prevLogTerm int, en
 	if leaderState == "leader" {
 		leaderState = "follower"
 		startNewElectionTimeout()
+	}
+
+	// TODO Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm
+	// TODO If an existing entry conflicts with a new one (same index  but different terms), delete the existing entry and all that follow it
+	// TODO Append any new entries not already in the log
+
+	if leaderCommit > commitIndex{
+		commitIndex = int(math.Min(float64(leaderCommit), float64(len(log) - 1)))
 	}
 	return 0, true
 }
