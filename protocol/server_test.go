@@ -1,4 +1,4 @@
-package raft
+package protocol
 
 import "testing"
 
@@ -15,6 +15,13 @@ func TestAppendEntriesLowerTerm(t *testing.T) {
 	_, isVoted := appendEntries(2, 2, 2, 2, make([]int, 0), 2)
 	if isVoted {
 		t.Errorf("appendEntries() is %t", isVoted)
+	}
+}
+
+func TestGetRandomDuration(t *testing.T) {
+	duration := getRandomDuration()
+	if duration.Milliseconds() < 150 || duration.Milliseconds() > 300 {
+		t.Errorf("getRandomDuration() is not in the range, it is: %d", duration.Microseconds())
 	}
 }
 
