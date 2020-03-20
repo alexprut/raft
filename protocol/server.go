@@ -1,7 +1,7 @@
 package protocol
 
 import (
-	"fmt"
+	"log"
 	"math"
 	"math/rand"
 	"net/url"
@@ -22,7 +22,7 @@ type LogEntry struct {
 // Persistent state on all servers
 var currentTerm int = 0 // latest term server has seen (initialized to 0 on first boot, increases monotonically)
 var votedFor int = 0    // candidateId that received vote in current term (or null if none)
-var log []LogEntry      // log entries; each entry contains command for state machine, and term when entry was received by leader (first index is 1)
+var logs []LogEntry      // log entries; each entry contains command for state machine, and term when entry was received by leader (first index is 1)
 
 // Volatile state on all servers
 var commitIndex int = 0 // index of highest log entry known to be committed (initialized to 0, increases monotonically)
@@ -88,7 +88,7 @@ func appendEntries(term int, leaderId int, prevLogIndex int, prevLogTerm int, en
 	// TODO Append any new entries not already in the log
 
 	if leaderCommit > commitIndex{
-		commitIndex = int(math.Min(float64(leaderCommit), float64(len(log) - 1)))
+		commitIndex = int(math.Min(float64(leaderCommit), float64(len(logs) - 1)))
 	}
 	return 0, true
 }
@@ -111,7 +111,7 @@ func startNewElectionTimeout() {
 		votes := 1 // vote for himself
 		votedFor = id
 		for range servers {
-			_, voteGranted := requestVote(currentTerm, id, len(log)-1, log[len(log)-1].term)
+			_, voteGranted := requestVote(currentTerm, id, len(logs)-1, logs[len(logs)-1].term)
 			if voteGranted {
 				votes++
 			}
@@ -121,11 +121,11 @@ func startNewElectionTimeout() {
 			leaderState = "leader"
 			// Send heartbeat to all servers to establish leadership
 			for range servers {
-				appendEntries(currentTerm, id, len(log)-1, log[len(log)-1].term, make([]int, 0), commitIndex)
+				appendEntries(currentTerm, id, len(logs)-1, logs[len(logs)-1].term, make([]int, 0), commitIndex)
 			}
 			// Volatile state on leader reinitialized after election
 			for i, _ := range nextIndex {
-				nextIndex[i] = len(log)
+				nextIndex[i] = len(logs)
 			}
 			for i, _ := range matchIndex {
 				nextIndex[i] = 0
@@ -136,7 +136,7 @@ func startNewElectionTimeout() {
 
 func Start(url *url.URL) {
 	leaderState = "follower"
-	fmt.Println("Server started on: " + url.String())
-	fmt.Println("State: " + leaderState)
+	log.Println("Server started on: " + url.String())
+	log.Println("State: " + leaderState)
 	startNewElectionTimeout()
 }

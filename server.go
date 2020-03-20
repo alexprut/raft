@@ -1,11 +1,10 @@
 package main
 
 import (
-	"fmt"
+	"./protocol"
 	"log"
 	"net/url"
 	"os"
-	"./protocol"
 )
 
 func main() {
@@ -13,6 +12,6 @@ func main() {
 	if err != nil {
 		log.Panicln("Invalid URL/Hostname format")
 	}
-	fmt.Println("Starting Server")
+	log.Println("Starting Server")
 	protocol.Start(url)
 }

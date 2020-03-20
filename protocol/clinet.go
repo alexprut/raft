@@ -1,7 +1,15 @@
 package protocol
 
-import "fmt"
+import (
+	"log"
+	"net/url"
+)
 
 func Send(value int) {
-	fmt.Printf("Send: " + string(value))
+	log.Printf("Send: " + string(value))
+}
+
+func Connect(url *url.URL) bool {
+	log.Println("Connecting to server: " + url.Host)
+	return true
 }
