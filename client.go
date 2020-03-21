@@ -2,17 +2,25 @@ package main
 
 import (
 	"./protocol"
+	"bufio"
 	"log"
-	"net/url"
 	"os"
+	"strconv"
 )
 
 func main() {
-	url, err := url.Parse(os.Args[1])
-	if err != nil {
-		log.Panicln("Invalid URL/Hostname format")
-	}
 	log.Printf("Started Client")
-	protocol.Connect(url)
-	protocol.Send(1) // FIXME remove example
+	for _, param := range os.Args[1:] {
+		log.Printf("Registering Server: " + param)
+		protocol.Connect(param)
+	}
+	input := bufio.NewScanner(os.Stdin)
+	for input.Scan() {
+		val, err := strconv.Atoi(input.Text())
+		if err != nil {
+			log.Printf("Invalid provided value")
+		} else {
+			protocol.Send(val)
+		}
+	}
 }

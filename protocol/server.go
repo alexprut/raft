@@ -4,11 +4,13 @@ import (
 	"log"
 	"math"
 	"math/rand"
-	"net/url"
+	"net"
+	"net/http"
+	"net/rpc"
 	"time"
 )
 
-var id int = 1 // FIXME this should be allocated on start and immutable after
+var id int = 1 // FIXME this should be allocated on start and immutable after, as a convention the id will be the host:port
 var electionTimeout *time.Timer = nil
 var leaderState string
 var servers []int
@@ -134,9 +136,16 @@ func startNewElectionTimeout() {
 	})
 }
 
-func Start(url *url.URL) {
+func Start(url string) {
 	leaderState = "follower"
-	log.Println("Server started on: " + url.String())
+	log.Println("Server started on: " + url)
 	log.Println("State: " + leaderState)
 	startNewElectionTimeout()
+	rpc.Register(new(RpcClient))
+	rpc.HandleHTTP()
+	l, e := net.Listen("tcp", url)
+	if e != nil {
+		log.Fatal("Listen error:", e)
+	}
+	go http.Serve(l, nil)
 }
