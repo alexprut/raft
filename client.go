@@ -12,6 +12,7 @@ func main() {
 	if err != nil {
 		log.Panicln("Invalid URL/Hostname format")
 	}
-	log.Println("Starting Server")
-	protocol.Start(url)
+	log.Printf("Started Client")
+	protocol.Connect(url)
+	protocol.Send(1) // FIXME remove example
 }
