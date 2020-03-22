@@ -5,7 +5,6 @@ import (
 	"math"
 	"math/rand"
 	"net"
-	"net/http"
 	"net/rpc"
 	"time"
 )
@@ -141,11 +140,18 @@ func Start(url string) {
 	log.Println("Server started on: " + url)
 	log.Println("State: " + leaderState)
 	startNewElectionTimeout()
-	rpc.Register(new(RpcClient))
-	rpc.HandleHTTP()
-	l, e := net.Listen("tcp", url)
-	if e != nil {
-		log.Fatal("Listen error:", e)
+
+	addy, err := net.ResolveTCPAddr("tcp", url)
+	if err != nil {
+		log.Fatal(err)
 	}
-	go http.Serve(l, nil)
+
+	inbound, err := net.ListenTCP("tcp", addy)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	listener := new(RpcClient)
+	rpc.Register(listener)
+	rpc.Accept(inbound)
 }
