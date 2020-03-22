@@ -13,11 +13,9 @@ type Server struct {
 	connection *rpc.Client
 }
 
-type RpcClient struct {
-	value int
-}
+type RpcClient int
 
-func (RpcClient) Send(value *int, reply *bool) error {
+func (t *RpcClient) Send(value int, reply *bool) error {
 	*reply = true
 	log.Printf("Received: %d", value)
 	return nil
@@ -33,7 +31,7 @@ func Send(value int) {
 
 func Connect(url string) bool {
 	log.Println("Connecting to server: " + url)
-	connection, err := rpc.DialHTTP("tcp", url)
+	connection, err := rpc.Dial("tcp", url)
 	connectionsServers[url] = Server{url: url, connection: connection}
 	if err != nil {
 		log.Println("Unable Connecting to server: ", err)
