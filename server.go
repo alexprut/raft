@@ -9,5 +9,5 @@ import (
 func main() {
 	url := os.Args[1]
 	log.Println("Starting Server")
-	protocol.Start(url)
+	protocol.Start(url, os.Args[2:])
 }
