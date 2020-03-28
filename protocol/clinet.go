@@ -2,14 +2,21 @@ package protocol
 
 import (
 	"log"
-	"net/url"
 )
 
-func Send(value int) {
-	log.Printf("Send: " + string(value))
+var idCurrentServer string
+
+type RpcClient int
+
+func (t *RpcClient) Send(value int, reply *bool) error {
+	*reply = handleClientRequest(value)
+	return nil
 }
 
-func Connect(url *url.URL) bool {
-	log.Println("Connecting to server: " + url.Host)
-	return true
+func Send(value int) {
+	var reply bool
+	err := connectionsServers[idCurrentServer].connection.Call("RpcClient.Send", &value, &reply)
+	if err != nil {
+		log.Println("Unable to send: ", err)
+	}
 }

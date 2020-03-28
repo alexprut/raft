@@ -3,15 +3,11 @@ package main
 import (
 	"./protocol"
 	"log"
-	"net/url"
 	"os"
 )
 
 func main() {
-	url, err := url.Parse(os.Args[1])
-	if err != nil {
-		log.Panicln("Invalid URL/Hostname format")
-	}
+	url := os.Args[1]
 	log.Println("Starting Server")
-	protocol.Start(url)
+	protocol.Start(url, os.Args[2:])
 }

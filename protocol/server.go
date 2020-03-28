@@ -4,11 +4,12 @@ import (
 	"log"
 	"math"
 	"math/rand"
-	"net/url"
+	"net"
+	"net/rpc"
 	"time"
 )
 
-var id int = 1 // FIXME this should be allocated on start and immutable after
+var id int = 1 // FIXME this should be allocated on start and immutable after, as a convention the id will be the host:port
 var electionTimeout *time.Timer = nil
 var leaderState string
 var servers []int
@@ -22,7 +23,7 @@ type LogEntry struct {
 // Persistent state on all servers
 var currentTerm int = 0 // latest term server has seen (initialized to 0 on first boot, increases monotonically)
 var votedFor int = 0    // candidateId that received vote in current term (or null if none)
-var logs []LogEntry      // log entries; each entry contains command for state machine, and term when entry was received by leader (first index is 1)
+var logs []LogEntry     // log entries; each entry contains command for state machine, and term when entry was received by leader (first index is 1)
 
 // Volatile state on all servers
 var commitIndex int = 0 // index of highest log entry known to be committed (initialized to 0, increases monotonically)
@@ -31,6 +32,41 @@ var lastApplied int = 0 // index of highest log entry applied to state machine (
 // Volatile state on leaders
 var nextIndex []int  // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
 var matchIndex []int // for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
+
+type RpcServer int
+
+type RpcServerReply struct {
+	term    int
+	success bool
+}
+
+type RpcArgsRequestVote struct {
+	term         int
+	candidateId  int
+	lastLogIndex int
+	lastLogTerm  int
+}
+
+type RpcArgsAppendEntries struct {
+	term         int
+	leaderId     int
+	prevLogIndex int
+	prevLogTerm  int
+	entries      []int
+	leaderCommit int
+}
+
+func (t *RpcServer) RequestVote(args RpcArgsRequestVote, reply *RpcServerReply) error {
+	term, voteGranted := requestVote(args.term, args.candidateId, args.lastLogIndex, args.lastLogTerm)
+	reply = &RpcServerReply{term: term, success: voteGranted}
+	return nil
+}
+
+func (t *RpcServer) AppendEntries(args RpcArgsAppendEntries, reply *RpcServerReply) error {
+	term, success := appendEntries(args.term, args.leaderId, args.prevLogIndex, args.prevLogTerm, args.entries, args.leaderCommit)
+	reply = &RpcServerReply{term: term, success: success}
+	return nil
+}
 
 // Invoked by candidates to gather votes
 //
@@ -87,15 +123,15 @@ func appendEntries(term int, leaderId int, prevLogIndex int, prevLogTerm int, en
 	// TODO If an existing entry conflicts with a new one (same index  but different terms), delete the existing entry and all that follow it
 	// TODO Append any new entries not already in the log
 
-	if leaderCommit > commitIndex{
-		commitIndex = int(math.Min(float64(leaderCommit), float64(len(logs) - 1)))
+	if leaderCommit > commitIndex {
+		commitIndex = int(math.Min(float64(leaderCommit), float64(len(logs)-1)))
 	}
 	return 0, true
 }
 
 // Returns a random duration between 150ms and 300ms
 func getRandomDuration() time.Duration {
-	return time.Millisecond * time.Duration(rand.Intn(150) + 150)
+	return time.Millisecond * time.Duration(rand.Intn(150)+150)
 }
 
 func startNewElectionTimeout() {
@@ -110,10 +146,19 @@ func startNewElectionTimeout() {
 		// TODO requestVote in parallel to each of the other servers
 		votes := 1 // vote for himself
 		votedFor = id
-		for range servers {
-			_, voteGranted := requestVote(currentTerm, id, len(logs)-1, logs[len(logs)-1].term)
-			if voteGranted {
-				votes++
+		for _, s := range connectionsServers {
+			if s.connection == nil {
+				Connect(s.url)
+			}
+			if s.connection != nil {
+				reply := RpcServerReply{}
+				s.connection.Call(
+					"RpcServer.requestVote",
+					RpcArgsRequestVote{currentTerm, id, len(logs) - 1, logs[len(logs)-1].term},
+					reply)
+				if reply.success {
+					votes++
+				}
 			}
 		}
 		// if votes received from majority of servers: become leader
@@ -134,9 +179,51 @@ func startNewElectionTimeout() {
 	})
 }
 
-func Start(url *url.URL) {
+type Server struct {
+	url        string
+	connection *rpc.Client
+}
+
+var connectionsServers map[string]Server = make(map[string]Server)
+
+func handleClientRequest(value int) bool {
+	log.Printf("Received: %d", value)
+	logs = append(logs, LogEntry{value: value, term: currentTerm})
+	return true
+}
+
+func Connect(url string) bool {
+	log.Println("Connecting to server: " + url)
+	connection, err := rpc.Dial("tcp", url)
+	connectionsServers[url] = Server{url: url, connection: connection}
+	if err != nil {
+		log.Println("Unable Connecting to server: ", err)
+		return false
+	}
+	idCurrentServer = url
+	log.Println("Connected to server: " + url)
+	return true
+}
+
+func Start(url string, urls []string) {
 	leaderState = "follower"
-	log.Println("Server started on: " + url.String())
+	log.Println("Server started on: " + url)
 	log.Println("State: " + leaderState)
 	startNewElectionTimeout()
+	for _, u := range urls {
+		Connect(u)
+	}
+	addy, err := net.ResolveTCPAddr("tcp", url)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	inbound, err := net.ListenTCP("tcp", addy)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	rpc.Register(new(RpcClient))
+	rpc.Register(new(RpcServer))
+	rpc.Accept(inbound)
 }
