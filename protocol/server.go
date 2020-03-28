@@ -9,10 +9,15 @@ import (
 	"time"
 )
 
-var id int = 1 // FIXME this should be allocated on start and immutable after, as a convention the id will be the host:port
+type Server struct {
+	url        string
+	connection *rpc.Client
+}
+
+var id string // allocated on start and immutable after, as a convention the id of the server is the "host:port"
 var electionTimeout *time.Timer = nil
 var leaderState string
-var servers []int
+var servers map[string]Server = make(map[string]Server)
 
 type LogEntry struct {
 	value int // contains command for state machine
@@ -22,7 +27,7 @@ type LogEntry struct {
 // Variables defined by the official Raft protocol
 // Persistent state on all servers
 var currentTerm int = 0 // latest term server has seen (initialized to 0 on first boot, increases monotonically)
-var votedFor int = 0    // candidateId that received vote in current term (or null if none)
+var votedFor string     // candidateId that received vote in current term (or null if none)
 var logs []LogEntry     // log entries; each entry contains command for state machine, and term when entry was received by leader (first index is 1)
 
 // Volatile state on all servers
@@ -42,14 +47,14 @@ type RpcServerReply struct {
 
 type RpcArgsRequestVote struct {
 	term         int
-	candidateId  int
+	candidateId  string
 	lastLogIndex int
 	lastLogTerm  int
 }
 
 type RpcArgsAppendEntries struct {
 	term         int
-	leaderId     int
+	leaderId     string
 	prevLogIndex int
 	prevLogTerm  int
 	entries      []int
@@ -72,14 +77,14 @@ func (t *RpcServer) AppendEntries(args RpcArgsAppendEntries, reply *RpcServerRep
 //
 // Params:
 //	term int: candidate’s term
-//	currentTerm int: candidate requesting vote
+//	candidateId string: candidate requesting vote
 //	lastLogIndex int: index of candidate’s last log entry
 //	lastLogTerm int: term of candidate’s last log entry
 //
 // Return:
 //	term: currentTerm, for candidate to update itself
 //	voteGranted: true means candidate received vote
-func requestVote(term int, candidateId int, lastLogIndex int, lastLogTerm int) (int, bool) {
+func requestVote(term int, candidateId string, lastLogIndex int, lastLogTerm int) (int, bool) {
 	startNewElectionTimeout()
 	if term < currentTerm {
 		leaderState = "follower"
@@ -89,7 +94,7 @@ func requestVote(term int, candidateId int, lastLogIndex int, lastLogTerm int) (
 
 	// If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote
 	// TODO candidate’s log is at least as up-to-date as receiver’s log
-	if votedFor == 0 || candidateId == 0 {
+	if votedFor == "" || candidateId == "" {
 		votedFor = candidateId
 		return currentTerm, true
 	}
@@ -100,7 +105,7 @@ func requestVote(term int, candidateId int, lastLogIndex int, lastLogTerm int) (
 //
 // Params:
 //	term int: leader’s term
-//	leaderId int: so follower can redirect clients
+//	leaderId string: so follower can redirect clients
 //	prevLogIndex int: index of log entry immediately preceding new ones
 //	prevLogTerm int: term of prevLogIndex entry
 //	entries []int: log entries to store (empty for heartbeat; may send more than one for efficiency)
@@ -109,7 +114,7 @@ func requestVote(term int, candidateId int, lastLogIndex int, lastLogTerm int) (
 // Return:
 //	term: currentTerm, for leader to update itself
 //	success: true if follower contained entry matching prevLogIndex and prevLogTerm
-func appendEntries(term int, leaderId int, prevLogIndex int, prevLogTerm int, entries []int, leaderCommit int) (int, bool) {
+func appendEntries(term int, leaderId string, prevLogIndex int, prevLogTerm int, entries []int, leaderCommit int) (int, bool) {
 	startNewElectionTimeout()
 	if term < currentTerm {
 		return currentTerm, false
@@ -143,10 +148,10 @@ func startNewElectionTimeout() {
 		leaderState = "candidate"
 		currentTerm++
 		startNewElectionTimeout() // reset election timer
-		// TODO requestVote in parallel to each of the other servers
+		// TODO requestVote in parallel to each of the other servers, use coroutines
 		votes := 1 // vote for himself
 		votedFor = id
-		for _, s := range connectionsServers {
+		for _, s := range servers {
 			if s.connection == nil {
 				Connect(s.url)
 			}
@@ -179,13 +184,6 @@ func startNewElectionTimeout() {
 	})
 }
 
-type Server struct {
-	url        string
-	connection *rpc.Client
-}
-
-var connectionsServers map[string]Server = make(map[string]Server)
-
 func handleClientRequest(value int) bool {
 	log.Printf("Received: %d", value)
 	logs = append(logs, LogEntry{value: value, term: currentTerm})
@@ -195,7 +193,7 @@ func handleClientRequest(value int) bool {
 func Connect(url string) bool {
 	log.Println("Connecting to server: " + url)
 	connection, err := rpc.Dial("tcp", url)
-	connectionsServers[url] = Server{url: url, connection: connection}
+	servers[url] = Server{url: url, connection: connection}
 	if err != nil {
 		log.Println("Unable Connecting to server: ", err)
 		return false
@@ -206,6 +204,7 @@ func Connect(url string) bool {
 }
 
 func Start(url string, urls []string) {
+	id = url
 	leaderState = "follower"
 	log.Println("Server started on: " + url)
 	log.Println("State: " + leaderState)
