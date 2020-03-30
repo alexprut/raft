@@ -125,6 +125,7 @@ func appendEntries(term int, leaderId string, prevLogIndex int, prevLogTerm int,
 	leader = leaderId
 	if leaderState == "leader" {
 		leaderState = "follower"
+		log.Println("State:", leaderState)
 	}
 
 	// If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it
@@ -166,7 +167,9 @@ func startNewElectionTimeout() {
 	electionTimeout = time.AfterFunc(getRandomDuration(), func() {
 		// on conversion to candidate start election
 		leaderState = "candidate"
+		log.Println("State:", leaderState)
 		currentTerm++
+		log.Println("Term:", currentTerm)
 		startNewElectionTimeout() // reset election timer
 		// TODO requestVote in parallel to each of the other servers, use coroutines
 		votes := 1 // vote for himself
@@ -178,10 +181,17 @@ func startNewElectionTimeout() {
 			}
 			if s.connection != nil {
 				reply := RpcServerReply{}
-				s.connection.Call(
-					"RpcServer.RequestVote",
-					RpcArgsRequestVote{currentTerm, id, len(logs) - 1, logs[len(logs)-1].term},
-					reply)
+				if len(logs) == 0 {
+					s.connection.Call(
+						"RpcServer.RequestVote",
+						RpcArgsRequestVote{currentTerm, id, 0, 0},
+						reply)
+				} else {
+					s.connection.Call(
+						"RpcServer.RequestVote",
+						RpcArgsRequestVote{currentTerm, id, len(logs) - 1, logs[len(logs)-1].term},
+						reply)
+				}
 				if reply.success {
 					votes++
 				}
@@ -189,8 +199,10 @@ func startNewElectionTimeout() {
 		}
 		// If votes received from majority of servers: become leader
 		if len(servers)/2 <= votes {
+			electionTimeout.Stop()
 			electionTimeout = nil
 			leaderState = "leader"
+			log.Println("State:", leaderState)
 			// Volatile state on leader reinitialized after election
 			for key, _ := range nextIndex {
 				nextIndex[key] = len(logs)
@@ -210,18 +222,27 @@ func startNewHeartBeatTimeout() {
 	if heartBeatTimeout != nil {
 		heartBeatTimeout.Stop()
 	}
-	heartBeatTimeout = time.AfterFunc(getRandomDuration() - time.Millisecond * 50, func() {
+	heartBeatTimeout = time.AfterFunc(getRandomDuration()-time.Millisecond*50, func() {
+		startNewHeartBeatTimeout()
 		sendServerHeartbeat()
 	})
 }
 
 func sendServerHeartbeat() {
+	log.Println("Sending heartbeat ...")
 	for _, s := range servers {
 		reply := RpcServerReply{}
-		s.connection.Call(
-			"RpcServer.AppendEntries",
-			RpcArgsAppendEntries{currentTerm, id, len(logs) - 1, logs[len(logs)-1].term, make([]LogEntry, 0), commitIndex},
-			reply)
+		if len(logs) == 0 {
+			s.connection.Call(
+				"RpcServer.AppendEntries",
+				RpcArgsAppendEntries{currentTerm, id, 0, 0, make([]LogEntry, 0), commitIndex},
+				reply)
+		} else {
+			s.connection.Call(
+				"RpcServer.AppendEntries",
+				RpcArgsAppendEntries{currentTerm, id, len(logs) - 1, logs[len(logs)-1].term, make([]LogEntry, 0), commitIndex},
+				reply)
+		}
 	}
 }
 
@@ -252,6 +273,7 @@ func Start(url string, urls []string) {
 	leaderState = "follower"
 	log.Println("Server started on: " + url)
 	log.Println("State: " + leaderState)
+	log.Println("Term:", currentTerm)
 	startNewElectionTimeout()
 	for _, u := range urls {
 		Connect(u)
