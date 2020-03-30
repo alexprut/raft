@@ -35,8 +35,8 @@ var commitIndex int = 0 // index of highest log entry known to be committed (ini
 var lastApplied int = 0 // index of highest log entry applied to state machine (initialized to 0, increases monotonically)
 
 // Volatile state on leaders
-var nextIndex []int  // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
-var matchIndex []int // for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
+var nextIndex map[string]int = make(map[string]int) // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
+var matchIndex []int                                // for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
 
 type RpcServer int
 
@@ -93,12 +93,13 @@ func requestVote(term int, candidateId string, lastLogIndex int, lastLogTerm int
 	}
 
 	// If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote
-	// TODO candidate’s log is at least as up-to-date as receiver’s log
-	if votedFor == "" || candidateId == "" {
+	if votedFor == "" ||
+		(len(logs) > 0 && logs[len(logs)-1].term < lastLogTerm) ||
+		(len(logs) > 0 && logs[len(logs)-1].term == lastLogTerm && len(logs)-1 <= lastLogIndex) {
 		votedFor = candidateId
 		return currentTerm, true
 	}
-	return currentTerm, true
+	return currentTerm, false
 }
 
 // Invoked by leader to replicate log entries, also used as heartbeat
@@ -158,7 +159,7 @@ func startNewElectionTimeout() {
 			if s.connection != nil {
 				reply := RpcServerReply{}
 				s.connection.Call(
-					"RpcServer.requestVote",
+					"RpcServer.RequestVote",
 					RpcArgsRequestVote{currentTerm, id, len(logs) - 1, logs[len(logs)-1].term},
 					reply)
 				if reply.success {
@@ -169,16 +170,21 @@ func startNewElectionTimeout() {
 		// if votes received from majority of servers: become leader
 		if len(servers)/2 <= votes {
 			leaderState = "leader"
-			// Send heartbeat to all servers to establish leadership
-			for range servers {
-				appendEntries(currentTerm, id, len(logs)-1, logs[len(logs)-1].term, make([]int, 0), commitIndex)
-			}
 			// Volatile state on leader reinitialized after election
-			for i, _ := range nextIndex {
-				nextIndex[i] = len(logs)
+			for key, _ := range nextIndex {
+				nextIndex[key] = len(logs)
 			}
-			for i, _ := range matchIndex {
-				nextIndex[i] = 0
+			for key, _ := range matchIndex {
+				matchIndex[key] = 0
+			}
+
+			// Send heartbeat to all servers to establish leadership
+			for _, s := range servers {
+				reply := RpcServerReply{}
+				s.connection.Call(
+					"RpcServer.AppendEntries",
+					RpcArgsAppendEntries{currentTerm, id, len(logs) - 1, logs[len(logs)-1].term, make([]int, 0), commitIndex},
+					reply)
 			}
 		}
 	})
