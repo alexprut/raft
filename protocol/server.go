@@ -21,8 +21,8 @@ var leaderState string
 var servers map[string]Server = make(map[string]Server)
 
 type LogEntry struct {
-	value int // contains command for state machine
-	term  int // term when entry was received by leader
+	Value int // contains command for state machine
+	Term  int // term when entry was received by leader
 }
 
 // Variables defined by the official Raft protocol
@@ -44,35 +44,35 @@ var leader string
 type RpcServer int
 
 type RpcServerReply struct {
-	term    int
-	success bool
+	Term    int
+	Success bool
 }
 
 type RpcArgsRequestVote struct {
-	term         int
-	candidateId  string
-	lastLogIndex int
-	lastLogTerm  int
+	Term         int
+	CandidateId  string
+	LastLogIndex int
+	LastLogTerm  int
 }
 
 type RpcArgsAppendEntries struct {
-	term         int
-	leaderId     string
-	prevLogIndex int
-	prevLogTerm  int
-	entries      []LogEntry
-	leaderCommit int
+	Term         int
+	LeaderId     string
+	PrevLogIndex int
+	PrevLogTerm  int
+	Entries      []LogEntry
+	LeaderCommit int
 }
 
 func (t *RpcServer) RequestVote(args RpcArgsRequestVote, reply *RpcServerReply) error {
-	term, voteGranted := requestVote(args.term, args.candidateId, args.lastLogIndex, args.lastLogTerm)
-	reply = &RpcServerReply{term: term, success: voteGranted}
+	term, voteGranted := requestVote(args.Term, args.CandidateId, args.LastLogIndex, args.LastLogTerm)
+	reply = &RpcServerReply{Term: term, Success: voteGranted}
 	return nil
 }
 
 func (t *RpcServer) AppendEntries(args RpcArgsAppendEntries, reply *RpcServerReply) error {
-	term, success := appendEntries(args.term, args.leaderId, args.prevLogIndex, args.prevLogTerm, args.entries, args.leaderCommit)
-	reply = &RpcServerReply{term: term, success: success}
+	term, success := appendEntries(args.Term, args.LeaderId, args.PrevLogIndex, args.PrevLogTerm, args.Entries, args.LeaderCommit)
+	reply = &RpcServerReply{term, success}
 	return nil
 }
 
@@ -96,9 +96,10 @@ func requestVote(term int, candidateId string, lastLogIndex int, lastLogTerm int
 
 	// If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote
 	if votedFor == "" ||
-		(len(logs) > 0 && logs[len(logs)-1].term < lastLogTerm) ||
-		(len(logs) > 0 && logs[len(logs)-1].term == lastLogTerm && len(logs)-1 <= lastLogIndex) {
+		(len(logs) > 0 && logs[len(logs)-1].Term < lastLogTerm) ||
+		(len(logs) > 0 && logs[len(logs)-1].Term == lastLogTerm && len(logs)-1 <= lastLogIndex) {
 		votedFor = candidateId
+		log.Println("Voted for:", candidateId)
 		return currentTerm, true
 	}
 	return currentTerm, false
@@ -118,6 +119,7 @@ func requestVote(term int, candidateId string, lastLogIndex int, lastLogTerm int
 //	term: currentTerm, for leader to update itself
 //	success: true if follower contained entry matching prevLogIndex and prevLogTerm
 func appendEntries(term int, leaderId string, prevLogIndex int, prevLogTerm int, entries []LogEntry, leaderCommit int) (int, bool) {
+	log.Println("Received append entries:", entries)
 	startNewElectionTimeout()
 	if term < currentTerm {
 		return currentTerm, false
@@ -125,23 +127,27 @@ func appendEntries(term int, leaderId string, prevLogIndex int, prevLogTerm int,
 	leader = leaderId
 	if leaderState == "leader" {
 		leaderState = "follower"
+		stopHeartBeatTimeout()
 		log.Println("State:", leaderState)
+	}
+	if len(logs) > 0 {
+		log.Println("Elements present")
 	}
 
 	// If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it
-	if len(logs)-1 < prevLogIndex && logs[prevLogIndex].term != prevLogTerm {
+	if len(logs) > 0 && (len(logs)-1 < prevLogIndex && logs[prevLogIndex].Term != prevLogTerm) {
 		logs = logs[:prevLogIndex]
 	}
 
 	// Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm
-	if len(logs)-1 < prevLogIndex || logs[prevLogIndex].term != prevLogTerm {
+	if len(logs) > 0 && (len(logs)-1 < prevLogIndex || logs[prevLogIndex].Term != prevLogTerm) {
 		return currentTerm, false
 	}
 
 	// Append any new entries not already in the log
 	for i, e := range entries {
 		if len(logs)-1 <= i+prevLogIndex {
-			if logs[i+prevLogIndex].term != e.term {
+			if logs[i+prevLogIndex].Term != e.Term {
 				logs = logs[:i+prevLogIndex-1]
 
 			}
@@ -157,7 +163,7 @@ func appendEntries(term int, leaderId string, prevLogIndex int, prevLogTerm int,
 
 // Returns a random duration between 150ms and 300ms
 func getRandomDuration() time.Duration {
-	return time.Millisecond * time.Duration(rand.Intn(150)+150)
+	return time.Millisecond * time.Duration(rand.Intn(5150)+150)
 }
 
 func startNewElectionTimeout() {
@@ -182,17 +188,23 @@ func startNewElectionTimeout() {
 			if s.connection != nil {
 				reply := RpcServerReply{}
 				if len(logs) == 0 {
-					s.connection.Call(
+					err := s.connection.Call(
 						"RpcServer.RequestVote",
 						RpcArgsRequestVote{currentTerm, id, 0, 0},
-						reply)
+						&reply)
+					if err != nil {
+						log.Println("Error:", err)
+					}
 				} else {
-					s.connection.Call(
+					err := s.connection.Call(
 						"RpcServer.RequestVote",
-						RpcArgsRequestVote{currentTerm, id, len(logs) - 1, logs[len(logs)-1].term},
-						reply)
+						RpcArgsRequestVote{currentTerm, id, len(logs) - 1, logs[len(logs)-1].Term},
+						&reply)
+					if err != nil {
+						log.Println("Error:", err)
+					}
 				}
-				if reply.success {
+				if reply.Success {
 					votes++
 				}
 			}
@@ -219,13 +231,17 @@ func startNewElectionTimeout() {
 }
 
 func startNewHeartBeatTimeout() {
-	if heartBeatTimeout != nil {
-		heartBeatTimeout.Stop()
-	}
+	stopHeartBeatTimeout()
 	heartBeatTimeout = time.AfterFunc(getRandomDuration()-time.Millisecond*50, func() {
 		startNewHeartBeatTimeout()
 		sendServerHeartbeat()
 	})
+}
+
+func stopHeartBeatTimeout() {
+	if heartBeatTimeout != nil {
+		heartBeatTimeout.Stop()
+	}
 }
 
 func sendServerHeartbeat() {
@@ -233,15 +249,21 @@ func sendServerHeartbeat() {
 	for _, s := range servers {
 		reply := RpcServerReply{}
 		if len(logs) == 0 {
-			s.connection.Call(
+			err := s.connection.Call(
 				"RpcServer.AppendEntries",
 				RpcArgsAppendEntries{currentTerm, id, 0, 0, make([]LogEntry, 0), commitIndex},
-				reply)
+				&reply)
+			if err != nil {
+				log.Println("Error:", err)
+			}
 		} else {
-			s.connection.Call(
+			err := s.connection.Call(
 				"RpcServer.AppendEntries",
-				RpcArgsAppendEntries{currentTerm, id, len(logs) - 1, logs[len(logs)-1].term, make([]LogEntry, 0), commitIndex},
-				reply)
+				RpcArgsAppendEntries{currentTerm, id, len(logs) - 1, logs[len(logs)-1].Term, make([]LogEntry, 0), commitIndex},
+				&reply)
+			if err != nil {
+				log.Println("Error:", err)
+			}
 		}
 	}
 }
@@ -249,7 +271,7 @@ func sendServerHeartbeat() {
 func handleClientRequest(value int) bool {
 	if leaderState == "leader" {
 		log.Printf("Received: %d", value)
-		logs = append(logs, LogEntry{value: value, term: currentTerm})
+		logs = append(logs, LogEntry{value, currentTerm})
 		return true
 	}
 	return false

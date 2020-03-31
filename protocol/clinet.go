@@ -17,6 +17,6 @@ func Send(value int) {
 	var reply bool
 	err := servers[idCurrentServer].connection.Call("RpcClient.Send", &value, &reply)
 	if err != nil {
-		log.Println("Unable to send: ", err)
+		log.Println("Unable to send:", err)
 	}
 }
