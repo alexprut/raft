@@ -12,18 +12,12 @@ func TestRequestVoteLowerTerm(t *testing.T) {
 
 func TestAppendEntriesLowerTerm(t *testing.T) {
 	currentTerm = 3
-	_, isVoted := appendEntries(2, "localhost:8000", 2, 2, make([]int, 0), 2)
+	_, isVoted := appendEntries(2, "localhost:8000", 2, 2, make([]LogEntry, 0), 2)
 	if isVoted {
 		t.Errorf("appendEntries() is %t", isVoted)
 	}
 }
 
-func TestGetRandomDuration(t *testing.T) {
-	duration := getRandomDuration()
-	if duration.Milliseconds() < 150 || duration.Milliseconds() > 300 {
-		t.Errorf("getRandomDuration() is not in the range, it is: %d", duration.Microseconds())
-	}
-}
-
+// TODO don't vote for an already voted term
 // TODO AppendEntries heartbeat
 // TODO nextIndex[] and matchIndex[] is reset after leader election
