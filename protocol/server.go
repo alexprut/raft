@@ -3,7 +3,6 @@ package protocol
 import (
 	"log"
 	"math"
-	"math/rand"
 	"net"
 	"net/rpc"
 	"time"
@@ -13,6 +12,13 @@ type Server struct {
 	url        string
 	connection *rpc.Client
 }
+
+const (
+	minElectionMsTimeout  = time.Duration(1150) * time.Millisecond // theoretically, according to the paper it should be 150ms
+	maxElectionMsTimeout  = time.Duration(1350) * time.Millisecond // theoretically, according to the paper it should be 350ms
+	minHeartbeatMsTimeout = minElectionMsTimeout / 2
+	maxHeartbeatMsTimeout = minElectionMsTimeout
+)
 
 var id string // allocated on start and immutable after, as a convention the id of the server is the "host:port"
 var electionTimeout *time.Timer = nil
@@ -25,10 +31,16 @@ type LogEntry struct {
 	Term  int // term when entry was received by leader
 }
 
+type vote struct {
+	candidateId string
+	term        int
+}
+
 // Variables defined by the official Raft protocol
 // Persistent state on all servers
+// TODO persist the state on non-volatile storage
 var currentTerm int = 0 // latest term server has seen (initialized to 0 on first boot, increases monotonically)
-var votedFor string     // candidateId that received vote in current term (or null if none)
+var votedFor vote       // candidateId that received vote in current term (or null if none)
 var logs []LogEntry     // log entries; each entry contains command for state machine, and term when entry was received by leader (first index is 1)
 
 // Volatile state on all servers
@@ -40,41 +52,6 @@ var nextIndex map[string]int = make(map[string]int) // for each server, index of
 var matchIndex []int                                // for each server, index of highest log entry known to be replicated on server (initialized to -1, increases monotonically)
 
 var leader string
-
-type RpcServer int
-
-type RpcServerReply struct {
-	Term    int
-	Success bool
-}
-
-type RpcArgsRequestVote struct {
-	Term         int
-	CandidateId  string
-	LastLogIndex int
-	LastLogTerm  int
-}
-
-type RpcArgsAppendEntries struct {
-	Term         int
-	LeaderId     string
-	PrevLogIndex int
-	PrevLogTerm  int
-	Entries      []LogEntry
-	LeaderCommit int
-}
-
-func (t *RpcServer) RequestVote(args RpcArgsRequestVote, reply *RpcServerReply) error {
-	term, voteGranted := requestVote(args.Term, args.CandidateId, args.LastLogIndex, args.LastLogTerm)
-	reply = &RpcServerReply{Term: term, Success: voteGranted}
-	return nil
-}
-
-func (t *RpcServer) AppendEntries(args RpcArgsAppendEntries, reply *RpcServerReply) error {
-	term, success := appendEntries(args.Term, args.LeaderId, args.PrevLogIndex, args.PrevLogTerm, args.Entries, args.LeaderCommit)
-	reply = &RpcServerReply{term, success}
-	return nil
-}
 
 // Invoked by candidates to gather votes
 //
@@ -92,16 +69,16 @@ func requestVote(term int, candidateId string, lastLogIndex int, lastLogTerm int
 	if term < currentTerm {
 		return currentTerm, false
 	}
-	currentTerm = term // if one server's current term is smaller than the other's, then it updates to the larger value
-	if leaderState != "follower" {
-		toFollower()
-	}
 
 	// If votedFor is null or candidateId, and candidate’s log is at least as up-to-date as receiver’s log, grant vote
-	if votedFor == "" ||
+	if votedFor.term != term ||
 		(len(logs) > 0 && logs[len(logs)-1].Term < lastLogTerm) ||
 		(len(logs) > 0 && logs[len(logs)-1].Term == lastLogTerm && len(logs)-1 <= lastLogIndex) {
-		votedFor = candidateId
+		votedFor = vote{candidateId, term}
+		if leaderState != "follower" {
+			toFollower()
+		}
+		currentTerm = term // if one server's current term is smaller than the other's, then it updates to the larger value
 		log.Println("Voted for:", candidateId)
 		return currentTerm, true
 	}
@@ -163,11 +140,6 @@ func appendEntries(term int, leaderId string, prevLogIndex int, prevLogTerm int,
 	return currentTerm, true
 }
 
-// Returns a random duration between 150ms and 300ms
-func getRandomDuration() time.Duration {
-	return time.Millisecond * time.Duration(rand.Intn(5150)+150)
-}
-
 func stopElectionTimeout() {
 	if electionTimeout != nil {
 		electionTimeout.Stop()
@@ -176,15 +148,14 @@ func stopElectionTimeout() {
 
 func startNewElectionTimeout() {
 	stopElectionTimeout()
-	electionTimeout = time.AfterFunc(getRandomDuration(), func() {
+	electionTimeout = time.AfterFunc(getRandomDuration(minElectionMsTimeout, maxElectionMsTimeout), func() {
 		startNewElectionTimeout() // reset election timer
-		// on conversion to candidate start election
-		toCandidate()
+		toCandidate()             // on conversion to candidate start election
 		currentTerm++
 		log.Println("Term:", currentTerm)
 		// TODO requestVote in parallel to each of the other servers, use coroutines
 		votes := 1 // vote for himself
-		votedFor = id
+		votedFor = vote{id, currentTerm}
 		// Send RequestVote RPCs to all other servers
 		for _, s := range servers {
 			if s.connection == nil {
@@ -217,15 +188,15 @@ func startNewElectionTimeout() {
 	})
 }
 
-func startNewHeartBeatTimeout() {
-	stopHeartBeatTimeout()
-	heartBeatTimeout = time.AfterFunc(getRandomDuration()-time.Millisecond*500, func() {
-		startNewHeartBeatTimeout()
+func startNewHeartbeatTimeout() {
+	stopHeartbeatTimeout()
+	heartBeatTimeout = time.AfterFunc(getRandomDuration(minHeartbeatMsTimeout, maxHeartbeatMsTimeout), func() {
+		startNewHeartbeatTimeout()
 		sendServerHeartbeat()
 	})
 }
 
-func stopHeartBeatTimeout() {
+func stopHeartbeatTimeout() {
 	if heartBeatTimeout != nil {
 		heartBeatTimeout.Stop()
 	}
@@ -272,20 +243,20 @@ func Connect(url string) bool {
 }
 
 func toFollower() {
-	stopHeartBeatTimeout()
+	stopHeartbeatTimeout()
 	leaderState = "follower"
 	log.Println("State:", leaderState)
 }
 
 func toCandidate() {
-	stopHeartBeatTimeout()
+	stopHeartbeatTimeout()
 	leaderState = "candidate"
 	log.Println("State:", leaderState)
 }
 
 func toLeader() {
 	// Stop election timeout
-	electionTimeout.Stop()
+	stopElectionTimeout()
 	electionTimeout = nil
 	leaderState = "leader"
 	log.Println("State:", leaderState)
@@ -299,7 +270,7 @@ func toLeader() {
 
 	// Send heartbeat to all servers to establish leadership
 	sendServerHeartbeat()
-	startNewHeartBeatTimeout()
+	startNewHeartbeatTimeout()
 }
 
 func Start(url string, urls []string) {
