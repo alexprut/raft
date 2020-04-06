@@ -182,7 +182,7 @@ func startNewElectionTimeout() {
 		log.Printf("Received votes: %d / %d", votes, len(servers)+1)
 
 		// If votes received from majority of servers: become leader
-		if (len(servers)+1)/2+1 <= votes {
+		if isMajority(len(servers)+1, votes) {
 			toLeader()
 		}
 	})
