@@ -118,7 +118,7 @@ func appendEntries(term int, leaderId string, prevLogIndex int, prevLogTerm int,
 		logs = logs[:prevLogIndex]
 	}
 
-	// Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm
+	// Reply false if log does not contain an entry at prevLogIndex whose term matches prevLogTerm
 	if len(logs) > 0 && (len(logs)-1 < prevLogIndex || logs[prevLogIndex].Term != prevLogTerm) {
 		return currentTerm, false
 	}
@@ -135,6 +135,7 @@ func appendEntries(term int, leaderId string, prevLogIndex int, prevLogTerm int,
 	}
 
 	if leaderCommit > commitIndex {
+		// TODO apply entries to local state machine
 		commitIndex = int(math.Min(float64(leaderCommit), float64(len(logs)-1)))
 	}
 	log.Println("Updated log entries:", logs)
@@ -231,6 +232,7 @@ func handleClientRequest(value int) (bool, string) {
 	entry := LogEntry{value, currentTerm}
 	logs = append(logs, entry)
 	log.Printf("Replicate entry to peers ...")
+	replications := 1
 	for _, s := range servers {
 		reply := RpcServerReply{}
 		err := s.connection.Call(
@@ -240,9 +242,19 @@ func handleClientRequest(value int) (bool, string) {
 		if err != nil {
 			log.Println("Error:", err)
 		}
+		if reply.Success {
+			replications++
+		} else {
+			// TODO implement iterative logic
+			nextIndex[s.url] = nextIndex[s.url] - 1
+		}
+	}
+	if isMajority(len(servers) + 1, replications) {
+		commitIndex = len(logs) - 1
+		return true, id
 	}
 
-	return true, id
+	return false, id
 }
 
 func Connect(url string) bool {
