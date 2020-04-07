@@ -1,7 +1,7 @@
 Raft
 ====
-An implementation of the Raft consensus algorithm in Go. The following implementation includes: Leader Election, Log Replication,
-Membership Changes and Log Compaction.
+An implementation of the [Raft](https://raft.github.io/raft.pdf) consensus algorithm in Go. The following implementation includes: Leader Election.
+Log Replication, Membership Changes and Log Compaction is currently work in progress.
 
 ### Build
 ```
