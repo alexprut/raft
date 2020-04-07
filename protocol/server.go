@@ -221,23 +221,38 @@ func sendServerHeartbeat() {
 }
 
 func handleClientRequest(value int) (bool, string) {
-	if leaderState == "leader" {
-		log.Printf("Received: %d", value)
-		logs = append(logs, LogEntry{value, currentTerm})
-		return true, id
+	log.Printf("Received: %d", value)
+	if leaderState != "leader" {
+		log.Println("Redirecting to current leader:", leader)
+		return false, leader
 	}
-	return false, leader
+
+	entry := LogEntry{value, currentTerm}
+	logs = append(logs, entry)
+	log.Printf("Replicate entry to peers ...")
+	for _, s := range servers {
+		reply := RpcServerReply{}
+		err := s.connection.Call(
+			"RpcServer.AppendEntries",
+			RpcArgsAppendEntries{currentTerm, id, len(logs) - 1, logs[len(logs)-1].Term, []LogEntry{entry}, commitIndex},
+			&reply)
+		if err != nil {
+			log.Println("Error:", err)
+		}
+	}
+
+	return true, id
 }
 
 func Connect(url string) bool {
 	log.Println("Connecting to server: " + url)
+	idCurrentServer = url // FIXME used only by the client, create a better abstraction
 	connection, err := rpc.Dial("tcp", url)
 	servers[url] = Server{url: url, connection: connection}
 	if err != nil {
 		log.Println("Unable Connecting to server: ", err)
 		return false
 	}
-	idCurrentServer = url
 	log.Println("Connected to server: " + url)
 	return true
 }

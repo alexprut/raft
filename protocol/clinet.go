@@ -15,7 +15,8 @@ type RpcSendReply struct {
 
 func (t *RpcClient) Send(value int, reply *RpcSendReply) error {
 	success, leader := handleClientRequest(value)
-	*reply = RpcSendReply{success, leader}
+	reply.Success = success
+	reply.Leader = leader
 	return nil
 }
 
@@ -24,7 +25,7 @@ func Send(value int) {
 	err := servers[idCurrentServer].connection.Call("RpcClient.Send", value, &reply)
 	if !reply.Success {
 		log.Println("Leader changed to:", reply.Leader)
-		Connect(leader)
+		idCurrentServer = reply.Leader
 		Send(value)
 	}
 	if err != nil {
