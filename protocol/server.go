@@ -110,7 +110,7 @@ func appendEntries(term int, leaderId string, prevLogIndex int, prevLogTerm int,
 		toFollower()
 	}
 	if len(logs) > 0 {
-		log.Println("Elements present")
+		log.Println("Current log entries:", logs)
 	}
 
 	// If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it
@@ -137,6 +137,7 @@ func appendEntries(term int, leaderId string, prevLogIndex int, prevLogTerm int,
 	if leaderCommit > commitIndex {
 		commitIndex = int(math.Min(float64(leaderCommit), float64(len(logs)-1)))
 	}
+	log.Println("Updated log entries:", logs)
 	return currentTerm, true
 }
 
