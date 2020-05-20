@@ -31,3 +31,4 @@ go test
 
 License
 =======
+Licensed under [MIT](https://github.com/alexprut/raft/blob/master/LICENSE).
